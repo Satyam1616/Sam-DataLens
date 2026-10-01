@@ -1,505 +1,315 @@
 "use client";
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Send, BarChart3, PieChart, LineChart as LineChartIcon, Database, LayoutDashboard, Settings, MessageSquare, Menu, X, ArrowUpRight, Save, CheckCircle2, User as UserIcon, LogOut, Trash2 } from 'lucide-react';
-import { 
-  BarChart, Bar, LineChart, Line, PieChart as RechartsPie, Pie, 
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell
-} from 'recharts';
+import {
+  Send, Database, Upload, Download, FileSpreadsheet, Sparkles, Menu, X,
+  Save, CheckCircle2, LogOut, Trash2, ArrowUpRight, Zap,
+} from "lucide-react";
+import { datasetFromCSV, Dataset } from "@/lib/csv";
+import { SAMPLE_CSV, SAMPLE_NAME } from "@/lib/sampleData";
+import ChartView from "@/components/ChartView";
 
 type Message = {
   id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  isChart?: boolean;
-  chartData?: any;
+  role: "user" | "assistant" | "system";
+  content?: string;
+  result?: any;
+  suggested?: string[];
+  poweredBy?: "groq" | "heuristic";
   saved?: boolean;
 };
 
-const COLORS = ['#00e0ff', '#bd00ff', '#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
+const MAX_ROWS = 5000;
+const uid = () => Math.random().toString(36).slice(2);
 
 export default function Dashboard() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      role: 'assistant',
-      content: 'Hello! I am SAM AI Lens. Ask me questions about the global sales data, such as "Show me revenue by region" or "What is the profit trend?"'
-    }
-  ]);
-  const [input, setInput] = useState('');
+  const [dataset, setDataset] = useState<Dataset | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [schema, setSchema] = useState<any>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [history, setHistory] = useState<any[]>([]);
   const [savingId, setSavingId] = useState<string | null>(null);
-  
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const endRef = useRef<HTMLDivElement>(null);
 
+  const greeting = (ds: Dataset): Message => ({
+    id: uid(),
+    role: "assistant",
+    content: `Loaded "${ds.name}" — ${ds.rows.length.toLocaleString()} rows across ${ds.columns.length} columns. Ask me anything about it in plain English.`,
+    suggested: defaultSuggestions(ds),
+  });
+
+  const loadSample = useCallback(() => {
+    const ds = datasetFromCSV(SAMPLE_CSV, SAMPLE_NAME);
+    setDataset(ds);
+    setMessages([greeting(ds)]);
+  }, []);
+
+  useEffect(() => { if (status === "unauthenticated") router.push("/login"); }, [status, router]);
+  useEffect(() => { loadSample(); }, [loadSample]);
   useEffect(() => {
-    if (status === "unauthenticated") {
-      router.push("/login");
-    }
-  }, [status, router]);
-
-  useEffect(() => {
-    // Fetch schema on load
-    fetch('/api/schema')
-      .then(res => res.json())
-      .then(data => setSchema(data['tables'][0]))
-      .catch(console.error);
-
-    // Fetch history if authenticated
-    if (status === "authenticated") {
-      fetch('/api/queries')
-        .then(res => res.json())
-        .then(data => setHistory(data.data || []))
-        .catch(console.error);
-    }
+    if (status === "authenticated")
+      fetch("/api/queries").then((r) => r.json()).then((d) => setHistory(d.data || [])).catch(() => {});
   }, [status]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+  const handleUpload = async (file: File) => {
+    const text = await file.text();
+    const ds = datasetFromCSV(text, file.name);
+    if (!ds.columns.length || !ds.rows.length) {
+      setMessages((m) => [...m, { id: uid(), role: "system", content: "That file didn't parse into any rows. Please upload a valid CSV with a header row." }]);
+      return;
+    }
+    setDataset(ds);
+    setMessages([greeting(ds)]);
+  };
+
+  const downloadSample = () => {
+    const blob = new Blob([SAMPLE_CSV], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = SAMPLE_NAME; a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const handleSend = async (text: string = input) => {
-    if (!text.trim()) return;
-
-    const userMsg: Message = { id: Date.now().toString(), role: 'user', content: text };
-    setMessages(prev => [...prev, userMsg]);
-    setInput('');
+    const q = text.trim();
+    if (!q || !dataset || loading) return;
+    setMessages((m) => [...m, { id: uid(), role: "user", content: q }]);
+    setInput("");
     setLoading(true);
-
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: text })
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: q,
+          dataset: { name: dataset.name, columns: dataset.columns, rows: dataset.rows.slice(0, MAX_ROWS) },
+        }),
       });
-      
       const data = await res.json();
-      
       if (data.error) throw new Error(data.error);
-
-      // Add text response
-      setMessages(prev => [...prev, {
-        id: Date.now().toString() + '-txt',
-        role: 'assistant',
-        content: data.insight
+      setMessages((m) => [...m, {
+        id: uid(), role: "assistant", content: data.insight,
+        result: data.data?.length ? data : undefined,
+        suggested: data.suggestedQuestions, poweredBy: data.poweredBy,
       }]);
-
-      // Add chart if applicable
-      if (data.data && data.data.length > 0) {
-        setMessages(prev => [...prev, {
-          id: Date.now().toString() + '-chart',
-          role: 'assistant',
-          content: '',
-          isChart: true,
-          chartData: data,
-          saved: false
-        }]);
-      }
-
-    } catch (error) {
-       setMessages(prev => [...prev, {
-        id: Date.now().toString() + '-err',
-        role: 'assistant',
-        content: "Sorry, I encountered an error processing that query."
-      }]);
+    } catch {
+      setMessages((m) => [...m, { id: uid(), role: "system", content: "Sorry — I couldn't analyse that. Try rephrasing your question." }]);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSaveQuery = async (msgId: string, chartData: any) => {
+  const handleSave = async (msgId: string, msg: Message) => {
     setSavingId(msgId);
     try {
-      // Find the last user question that prompted this chart
-      const parentUserMsg = messages
-         .slice(0, messages.findIndex(m => m.id === msgId))
-         .reverse()
-         .find(m => m.role === 'user');
-      
-      const res = await fetch('/api/queries', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question: parentUserMsg?.content || "Saved AI Insight",
-          sql: "", // If we were using live LLM, we'd pull it from chartData.sql
-          chartType: chartData.chartType,
-          chartData: chartData
-        })
+      const parent = [...messages].slice(0, messages.findIndex((m) => m.id === msgId)).reverse().find((m) => m.role === "user");
+      const res = await fetch("/api/queries", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: parent?.content || msg.result?.title || "Saved insight", sql: "", chartType: msg.result?.chartType, chartData: msg.result }),
       });
-
       if (res.ok) {
-        setMessages(prev => prev.map(m => m.id === msgId ? { ...m, saved: true } : m));
-        // Refresh history
-        const historyRes = await fetch('/api/queries');
-        const historyData = await historyRes.json();
-        setHistory(historyData.data || []);
+        setMessages((m) => m.map((x) => (x.id === msgId ? { ...x, saved: true } : x)));
+        fetch("/api/queries").then((r) => r.json()).then((d) => setHistory(d.data || [])).catch(() => {});
       }
-    } catch (e) {
-      console.error("Save failed", e);
-    } finally {
-      setSavingId(null);
-    }
+    } catch { /* ignore */ } finally { setSavingId(null); }
   };
 
-  const handleDeleteHistory = async (id: string, e: React.MouseEvent) => {
+  const deleteHistory = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      const res = await fetch(`/api/queries?id=${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        setHistory(prev => prev.filter(q => q.id !== id));
-      }
-    } catch (err) {
-      console.error("Failed to delete", err);
-    }
-  };
-
-  const renderChart = (chartConfig: any) => {
-    const { chartType, data, xAxisKey, seriesKeys } = chartConfig;
-    
-    if (chartType === 'metric') {
-        return (
-            <div className="grid grid-cols-2 gap-4">
-                {data.map((item: any, i: number) => (
-                    <div key={i} className="glass p-6 rounded-xl border border-white/5 flex flex-col items-center justify-center text-center">
-                        <span className="text-gray-400 text-sm font-medium mb-2">{item.name}</span>
-                        <span className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary">
-                            {typeof item.value === 'number' ? `$${item.value.toLocaleString()}` : item.value}
-                        </span>
-                    </div>
-                ))}
-            </div>
-        )
-    }
-
-    if (chartType === 'bar') {
-      return (
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" vertical={false} />
-            <XAxis dataKey={xAxisKey} stroke="#888" tick={{fill: '#888'}} />
-            <YAxis stroke="#888" tickFormatter={(val) => `$${(val/1000)}k`} />
-            <Tooltip 
-              contentStyle={{ backgroundColor: '#111', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '8px' }}
-              itemStyle={{ color: '#fff' }}
-              formatter={(val: any) => `$${Number(val).toLocaleString()}`}
-            />
-            <Legend />
-            {seriesKeys.map((key: string, i: number) => (
-               <Bar key={key} dataKey={key} fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} maxBarSize={60} />
-            ))}
-          </BarChart>
-        </ResponsiveContainer>
-      );
-    }
-
-    if (chartType === 'line') {
-      return (
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" vertical={false} />
-            <XAxis dataKey={xAxisKey} stroke="#888" />
-            <YAxis stroke="#888" tickFormatter={(val) => `$${(val/1000)}k`} />
-            <Tooltip 
-              contentStyle={{ backgroundColor: '#111', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '8px' }}
-              formatter={(val: any) => `$${Number(val).toLocaleString()}`}
-            />
-            <Legend />
-            {seriesKeys.map((key: string, i: number) => (
-               <Line key={key} type="monotone" dataKey={key} stroke={COLORS[i % COLORS.length]} strokeWidth={3} dot={{r: 4, fill: '#050505', strokeWidth: 2}} activeDot={{r: 6}} />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      );
-    }
-
-    if (chartType === 'pie') {
-      return (
-        <ResponsiveContainer width="100%" height={300}>
-          <RechartsPie>
-            <Pie
-              data={data}
-              cx="50%"
-              cy="50%"
-              innerRadius={60}
-              outerRadius={100}
-              paddingAngle={5}
-              dataKey={seriesKeys[0]}
-              nameKey={xAxisKey}
-              label={({name, percent}) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
-              labelLine={false}
-            >
-              {data.map((entry: any, index: number) => (
-                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-              ))}
-            </Pie>
-            <Tooltip 
-              contentStyle={{ backgroundColor: '#111', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '8px' }}
-              formatter={(val: any) => `$${Number(val).toLocaleString()}`}
-            />
-            <Legend />
-          </RechartsPie>
-        </ResponsiveContainer>
-      );
-    }
-
-    return null;
+      const res = await fetch(`/api/queries?id=${id}`, { method: "DELETE" });
+      if (res.ok) setHistory((h) => h.filter((q) => q.id !== id));
+    } catch { /* ignore */ }
   };
 
   if (status === "loading") {
-    return <div className="min-h-screen bg-background flex justify-center items-center text-primary"><div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary"></div></div>;
+    return <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="h-6 w-6 rounded-full border-2 border-border border-t-primary animate-spin" />
+    </div>;
   }
 
   return (
-    <div className="flex h-screen bg-background text-foreground overflow-hidden font-sans relative">
-      
-      {/* Mobile Sidebar Overlay */}
-      {sidebarOpen && (
-        <div 
-          className="md:hidden absolute inset-0 bg-background/60 backdrop-blur-sm z-20"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
+    <div className="flex h-screen bg-background text-foreground overflow-hidden">
+      {sidebarOpen && <div className="md:hidden fixed inset-0 bg-black/40 z-20" onClick={() => setSidebarOpen(false)} />}
 
       {/* Sidebar */}
-      <div className={`${sidebarOpen ? 'w-[85vw] sm:w-80 border-r' : 'w-0 border-r-0'} 
-        absolute md:relative h-full transition-all duration-300 flex-shrink-0 
-        border-border bg-card/95 md:bg-muted/30 backdrop-blur-xl md:backdrop-blur-none 
-        flex flex-col overflow-hidden z-30 shadow-2xl md:shadow-none`}>
-        <div className="p-6 border-b border-border flex items-center justify-between min-w-[300px]">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center font-bold text-white shadow-[0_0_10px_rgba(0,224,255,0.3)]">S</div>
-            <span className="font-bold text-lg tracking-wide text-foreground">SAM AI Lens</span>
+      <aside className={`${sidebarOpen ? "w-[85vw] sm:w-72 translate-x-0" : "-translate-x-full md:translate-x-0 md:w-0"} fixed md:relative h-full z-30 flex-shrink-0 border-r border-border bg-card transition-all duration-300 flex flex-col overflow-hidden`}>
+        <div className="h-16 px-5 flex items-center justify-between border-b border-border min-w-[260px]">
+          <div className="flex items-center gap-2.5">
+            <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
+              <Sparkles size={16} className="text-primary-foreground" />
+            </div>
+            <span className="font-semibold tracking-tight">DataLens</span>
           </div>
-          <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-muted-foreground hover:text-foreground">
-            <X size={20} />
-          </button>
+          <button onClick={() => setSidebarOpen(false)} className="md:hidden text-muted-foreground"><X size={18} /></button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-8">
+        <div className="flex-1 overflow-y-auto p-5 space-y-6 min-w-[260px]">
           <div>
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
-              <Database size={14} /> Data Sources
-            </h3>
-            <div className="glass rounded-lg border border-border p-4 bg-card/50">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
-                <span className="font-medium text-sm">Enterprise Data Warehouse</span>
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1.5"><Database size={13} /> Dataset</h3>
+            <div className="surface rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <FileSpreadsheet size={15} className="text-primary flex-shrink-0" />
+                <span className="text-sm font-medium truncate">{dataset?.name ?? "No data"}</span>
               </div>
-              
-              {schema && (
-                <div className="mt-4 pt-4 border-t border-border">
-                  <span className="text-xs text-muted-foreground">Active Table:</span>
-                  <div className="text-sm font-medium text-foreground mb-2">{schema.name}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {schema.rowCount} rows indexed
+              {dataset && (
+                <>
+                  <div className="text-xs text-muted-foreground mb-3">{dataset.rows.length.toLocaleString()} rows · {dataset.columns.length} columns</div>
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    {dataset.columns.slice(0, 10).map((c) => (
+                      <span key={c.name} className="px-1.5 py-0.5 text-[10px] rounded border border-border bg-muted text-muted-foreground">{c.name}</span>
+                    ))}
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-1">
-                     {schema.columns.map((col: any) => (
-                       <span key={col.name} className="px-2 py-1 text-[10px] bg-background rounded border border-border text-muted-foreground">
-                         {col.name}
-                       </span>
-                     ))}
-                  </div>
-                </div>
+                </>
               )}
+              <div className="flex flex-col gap-2">
+                <button onClick={() => fileRef.current?.click()} className="w-full inline-flex items-center justify-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary-hover transition-colors">
+                  <Upload size={13} /> Upload CSV
+                </button>
+                <div className="flex gap-2">
+                  <button onClick={loadSample} className="flex-1 text-xs font-medium px-2 py-1.5 rounded-lg border border-border hover:bg-muted transition-colors">Sample</button>
+                  <button onClick={downloadSample} className="inline-flex items-center justify-center gap-1 text-xs font-medium px-2 py-1.5 rounded-lg border border-border hover:bg-muted transition-colors" title="Download sample CSV"><Download size={13} /></button>
+                </div>
+              </div>
+              <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ""; }} />
             </div>
           </div>
-          
+
           <div>
-             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">Saved History</h3>
-             <ul className="space-y-2 text-sm text-muted-foreground">
-               {history.length === 0 ? (
-                 <li className="text-xs text-muted-foreground italic p-2">No queries saved yet.</li>
-               ) : (
-                 history.slice(0, 5).map(q => (
-                    <li key={q.id} className="flex flex-col gap-1 px-3 py-2 rounded-md bg-card border border-border hover:border-primary/50 transition-colors cursor-pointer group">
-                      <div className="flex items-center justify-between text-foreground font-medium">
-                        <span className="truncate pr-2">{q.question}</span>
-                        <button 
-                          onClick={(e) => handleDeleteHistory(q.id, e)} 
-                          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 transition-all p-1"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="text-[10px] text-muted-foreground/80 uppercase">{new Date(q.createdAt).toLocaleDateString()}</span>
-                        {q.chartType === 'line' ? <LineChartIcon size={12} className="text-primary flex-shrink-0"/> : 
-                         q.chartType === 'pie' ? <PieChart size={12} className="text-secondary flex-shrink-0"/> :
-                         <BarChart3 size={12} className="text-primary flex-shrink-0"/>}
-                      </div>
-                    </li>
-                 ))
-               )}
-             </ul>
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Saved</h3>
+            {history.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">No saved insights yet.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {history.slice(0, 8).map((q) => (
+                  <li key={q.id} className="group flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border hover:border-primary/40 bg-card transition-colors">
+                    <span className="text-xs truncate text-foreground">{q.question}</span>
+                    <button onClick={(e) => deleteHistory(q.id, e)} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-rose-500 transition-all"><Trash2 size={12} /></button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
-      </div>
+      </aside>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col relative w-full">
-        {/* Header */}
-        <header className="h-16 border-b border-border flex items-center justify-between px-6 bg-muted/30 backdrop-blur-sm z-10">
-          <div className="flex items-center gap-4">
-            {!sidebarOpen && (
-              <button onClick={() => setSidebarOpen(true)} className="text-muted-foreground hover:text-foreground">
-                <Menu size={20} />
-              </button>
-            )}
-            <h1 className="font-medium text-lg text-foreground">Interactive Dashboard</h1>
+      {/* Main */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="h-16 border-b border-border flex items-center justify-between px-4 md:px-6 bg-background/80 backdrop-blur">
+          <div className="flex items-center gap-3">
+            {!sidebarOpen && <button onClick={() => setSidebarOpen(true)} className="text-muted-foreground hover:text-foreground"><Menu size={20} /></button>}
+            <div>
+              <h1 className="font-semibold tracking-tight leading-none">Workspace</h1>
+              <p className="text-xs text-muted-foreground mt-1">Natural-language analytics</p>
+            </div>
           </div>
-          <div className="flex items-center gap-4">
-             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-background border border-border text-xs text-muted-foreground">
-                <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                AI Engine Active
-             </div>
-             {session?.user && (
-               <div className="flex items-center gap-3 glass px-3 py-1.5 rounded-full border border-border bg-card/50">
-                 <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-primary to-secondary flex items-center justify-center">
-                   <UserIcon size={12} className="text-white" />
-                 </div>
-                 <span className="text-sm font-medium hidden md:block text-foreground">{session.user.name}</span>
-                 <button onClick={() => signOut()} className="ml-2 text-muted-foreground hover:text-foreground transition-colors">
-                   <LogOut size={16} />
-                 </button>
-               </div>
-             )}
+          <div className="flex items-center gap-3">
+            <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-muted-foreground px-2.5 py-1 rounded-full border border-border">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Ready
+            </span>
+            {session?.user && (
+              <div className="flex items-center gap-2 pl-2 border-l border-border">
+                <div className="h-7 w-7 rounded-full bg-muted border border-border flex items-center justify-center text-xs font-medium">{(session.user.name || "U")[0].toUpperCase()}</div>
+                <span className="text-sm hidden md:block">{session.user.name}</span>
+                <button onClick={() => signOut({ callbackUrl: "/" })} className="text-muted-foreground hover:text-foreground ml-1"><LogOut size={16} /></button>
+              </div>
+            )}
           </div>
         </header>
 
-        {/* Chat / Visualization Area */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth">
-          <div className="max-w-4xl mx-auto space-y-6 pb-20">
-            {messages.map((msg, i) => (
-              <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                
-                {msg.role === 'assistant' && !msg.isChart && (
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center flex-shrink-0 mr-2 md:mr-4 shadow-lg">
-                    <span className="text-xs font-bold text-white">M</span>
-                  </div>
-                )}
-                
-                <div className={`
-                  max-w-[95%] md:max-w-[85%] 
-                  ${msg.isChart ? 'w-full' : ''} 
-                  ${msg.role === 'user' 
-                    ? 'bg-gradient-to-r from-primary/20 to-secondary/20 border border-primary/30 rounded-2xl rounded-tr-sm px-5 py-4 text-foreground' 
-                    : msg.isChart
-                      ? 'glass p-6 rounded-2xl border-border bg-card/50 w-full'
-                      : 'bg-muted border border-border rounded-2xl rounded-tl-sm px-5 py-4 text-foreground'
-                  }
-                `}>
-                  {msg.isChart ? (
-                    <div className="w-full">
-                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-                         <h3 className="font-medium text-base md:text-lg flex items-center gap-2 text-foreground">
-                            {msg.chartData.chartType === 'line' ? <LineChartIcon className="text-primary"/> : 
-                             msg.chartData.chartType === 'pie' ? <PieChart className="text-secondary"/> :
-                             <BarChart3 className="text-primary"/>} 
-                            Generated Visualization
-                         </h3>
-                         
-                         <button 
-                            onClick={() => handleSaveQuery(msg.id, msg.chartData)}
-                            disabled={msg.saved || savingId === msg.id}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full transition-all ${
-                              msg.saved 
-                                ? 'bg-green-500/20 text-green-600 dark:text-green-400 border border-green-500/30' 
-                                : 'bg-background hover:bg-muted text-foreground border border-border'
-                            }`}
-                         >
-                           {savingId === msg.id ? (
-                             <div className="w-3 h-3 border-2 border-primary/50 border-t-primary rounded-full animate-spin" />
-                           ) : msg.saved ? (
-                             <><CheckCircle2 size={14} /> Saved</>
-                           ) : (
-                             <><Save size={14} /> Save Chart</>
-                           )}
-                         </button>
-                      </div>
-                      
-                      <div className="w-full bg-card rounded-xl p-4 border border-border">
-                        {renderChart(msg.chartData)}
-                      </div>
-                      
-                      {msg.chartData.suggestedQuestions && (
-                        <div className="mt-6 pt-4 border-t border-border">
-                           <p className="text-xs text-muted-foreground uppercase tracking-wider mb-3 font-semibold">Suggested follow-ups</p>
-                           <div className="flex flex-wrap gap-2">
-                              {msg.chartData.suggestedQuestions.map((sq: string, idx: number) => (
-                                <button 
-                                  key={idx}
-                                  onClick={() => handleSend(sq)}
-                                  className="text-xs px-3 py-2 rounded-full bg-background border border-border hover:bg-muted transition-colors text-foreground flex items-center gap-1 text-left"
-                                >
-                                  {sq} <ArrowUpRight size={12} className="flex-shrink-0" />
-                                </button>
-                              ))}
-                           </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="leading-relaxed text-foreground">{msg.content}</p>
-                  )}
-                </div>
-              </div>
+        <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6">
+          <div className="max-w-3xl mx-auto space-y-5 pb-28">
+            {messages.map((msg) => (
+              <MessageBubble key={msg.id} msg={msg} onSuggest={handleSend} onSave={handleSave} saving={savingId === msg.id} />
             ))}
-            
             {loading && (
-              <div className="flex justify-start">
-                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center flex-shrink-0 mr-4">
-                    <span className="text-xs font-bold text-white">M</span>
-                 </div>
-                 <div className="bg-muted border border-border rounded-2xl rounded-tl-sm px-5 py-4 flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{animationDelay: '0ms'}}/>
-                    <div className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{animationDelay: '150ms'}}/>
-                    <div className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{animationDelay: '300ms'}}/>
-                 </div>
+              <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                <Zap size={14} className="text-primary animate-pulse" /> Analysing your data…
               </div>
             )}
-            <div ref={messagesEndRef} />
+            <div ref={endRef} />
           </div>
         </div>
 
-        {/* Input Area */}
-        <div className="absolute bottom-0 left-0 w-full p-4 bg-gradient-to-t from-background via-background/90 to-transparent pt-10">
-          <div className="max-w-4xl mx-auto relative">
-            <div className="absolute -inset-1 bg-gradient-to-r from-primary/30 to-secondary/30 rounded-2xl blur opacity-30"></div>
-            <div className="relative glass border border-border rounded-2xl p-2 flex items-end shadow-2xl bg-card">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-                placeholder="Ask about your data (e.g., 'Show total revenue by region')"
-                className="w-full bg-transparent text-foreground placeholder-muted-foreground border-none focus:ring-0 resize-none max-h-32 min-h-[44px] p-3 text-sm flex-1 outline-none"
-                rows={1}
-              />
-              <button
-                onClick={() => handleSend()}
-                disabled={!input.trim() || loading}
-                className="m-1 p-3 rounded-xl bg-gradient-to-r from-primary to-secondary text-white disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-[0_0_15px_rgba(0,224,255,0.4)] transition-all flex-shrink-0"
-              >
-                <Send size={18} />
+        {/* Composer */}
+        <div className="border-t border-border bg-background px-4 md:px-8 py-4">
+          <div className="max-w-3xl mx-auto">
+            <div className="surface rounded-xl flex items-end gap-2 p-2 focus-within:ring-2 focus-within:ring-[var(--ring)] transition-shadow">
+              <textarea value={input} onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                placeholder={dataset ? `Ask about ${dataset.name}…` : "Upload a CSV to begin…"} rows={1}
+                className="flex-1 bg-transparent resize-none outline-none text-sm px-3 py-2 max-h-32 placeholder:text-muted-foreground" />
+              <button onClick={() => handleSend()} disabled={!input.trim() || loading || !dataset}
+                className="p-2.5 rounded-lg bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary-hover transition-colors">
+                <Send size={16} />
               </button>
             </div>
+            <p className="text-[11px] text-muted-foreground mt-2 text-center">DataLens interprets your question, computes real numbers from your data, then explains the result.</p>
           </div>
         </div>
-
       </div>
     </div>
   );
+}
+
+function MessageBubble({ msg, onSuggest, onSave, saving }: { msg: Message; onSuggest: (q: string) => void; onSave: (id: string, m: Message) => void; saving: boolean }) {
+  if (msg.role === "user") {
+    return <div className="flex justify-end"><div className="max-w-[85%] bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm">{msg.content}</div></div>;
+  }
+  if (msg.role === "system") {
+    return <div className="flex justify-center"><div className="text-xs text-muted-foreground bg-muted border border-border rounded-full px-3 py-1.5">{msg.content}</div></div>;
+  }
+  return (
+    <div className="flex gap-3">
+      <div className="h-7 w-7 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 mt-0.5"><Sparkles size={14} className="text-primary-foreground" /></div>
+      <div className="flex-1 min-w-0 space-y-3">
+        {msg.content && <p className="text-sm leading-relaxed text-foreground">{msg.content}</p>}
+        {msg.result && (
+          <div className="surface rounded-xl p-4">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h3 className="text-sm font-medium truncate">{msg.result.title}</h3>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {msg.poweredBy === "groq" && <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-muted-foreground"><Zap size={10} className="text-primary" /> Groq</span>}
+                <button onClick={() => onSave(msg.id, msg)} disabled={msg.saved || saving}
+                  className={`inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors ${msg.saved ? "border-emerald-500/30 text-emerald-600 dark:text-emerald-400" : "border-border hover:bg-muted"}`}>
+                  {saving ? <div className="h-3 w-3 rounded-full border-2 border-border border-t-primary animate-spin" /> : msg.saved ? <><CheckCircle2 size={13} /> Saved</> : <><Save size={13} /> Save</>}
+                </button>
+              </div>
+            </div>
+            <ChartView result={msg.result} />
+          </div>
+        )}
+        {msg.suggested && msg.suggested.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {msg.suggested.map((s, i) => (
+              <button key={i} onClick={() => onSuggest(s)} className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-full border border-border hover:bg-muted hover:border-primary/40 transition-colors text-foreground">
+                {s} <ArrowUpRight size={11} className="text-muted-foreground" />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function defaultSuggestions(ds: Dataset): string[] {
+  const num = ds.columns.find((c) => c.type === "number");
+  const date = ds.columns.find((c) => c.type === "date");
+  const cat = ds.columns.filter((c) => c.type === "string" && c.distinct > 1 && c.distinct <= 50);
+  const out: string[] = [];
+  if (num && cat[0]) out.push(`${num.name} by ${cat[0].name}`);
+  if (num && date) out.push(`${num.name} trend over time`);
+  if (num && cat[1]) out.push(`Share of ${num.name} by ${cat[1].name}`);
+  if (out.length < 3 && num) out.push(`Total ${num.name}`);
+  return out.slice(0, 3);
 }

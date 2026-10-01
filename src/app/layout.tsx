@@ -4,22 +4,16 @@ import AuthProvider from "@/components/AuthProvider";
 import { ThemeProvider } from "@/components/ThemeProvider";
 
 export const metadata: Metadata = {
-  title: "SAM AI Lens",
-  description: "Transform how users interact with data by enabling natural language queries and delivering instant and intelligent insights.",
+  title: "DataLens — Ask your data anything",
+  description: "Upload a CSV and ask questions in plain English. DataLens computes the real numbers and explains the result with a chart. Powered by Groq.",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning className="dark scroll-smooth">
-      <body className="font-sans antialiased text-foreground bg-background selection:bg-primary/30 selection:text-white transition-colors duration-300">
+    <html lang="en" suppressHydrationWarning className="scroll-smooth">
+      <body className="font-sans antialiased text-foreground bg-background">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <AuthProvider>
-            {children}
-          </AuthProvider>
+          <AuthProvider>{children}</AuthProvider>
         </ThemeProvider>
       </body>
     </html>

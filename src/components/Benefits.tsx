@@ -1,67 +1,59 @@
-import { Zap, ShieldCheck, Cpu } from "lucide-react";
+const steps = [
+  { n: "01", title: "Upload your CSV", desc: "Drag in a file or start with the built-in sample. DataLens profiles every column and its type." },
+  { n: "02", title: "Ask a question", desc: "“Revenue by region”, “profit trend over time”, “which segment is growing fastest?” — however you'd say it." },
+  { n: "03", title: "Read the answer", desc: "A chart plus a plain-English insight computed from your actual rows, ready to save or revisit." },
+];
 
 export default function Benefits() {
-  const benefits = [
-    {
-      title: "Informed decisions",
-      description:
-        "Move beyond guesswork — leverage data-backed insights to make informed decisions that reduce risk and accelerate growth.",
-      icon: <ShieldCheck className="w-8 h-8 text-primary" />,
-    },
-    {
-      title: "Streamlined operations",
-      description:
-        "Automate processes and reduce manual effort with insights that keep your operations running smoothly.",
-      icon: <Zap className="w-8 h-8 text-secondary" />,
-    },
-    {
-      title: "Plug-and-play extensibility",
-      description:
-        "Quickly connect to your existing tools and systems with plug-and-play extensibility, so your data workflows stay seamless and scalable.",
-      icon: <Cpu className="w-8 h-8 text-primary" />,
-    },
-  ];
-
   return (
-    <section className="py-16 md:py-24 relative overflow-hidden border-y border-border bg-muted/5">
-      {/* Background gradients */}
-      <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary/5 rounded-full blur-[100px] pointer-events-none" />
-      <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-secondary/5 rounded-full blur-[100px] pointer-events-none" />
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-        <div className="text-center max-w-3xl mx-auto mb-12 md:mb-16">
-          <h2 className="text-3xl md:text-5xl font-bold mb-6 text-foreground">
-            See how your business can benefit from{" "}
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary">
-              SAM AI Lens
-            </span>
-          </h2>
-          <p className="text-muted-foreground text-lg">
-            Transform raw data into clear insights that drive smarter and faster
-            decisions.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {benefits.map((benefit, index) => (
-            <div
-              key={index}
-              className="glass p-8 rounded-2xl hover:-translate-y-2 transition-transform duration-500 border border-border group relative bg-card/50"
-            >
-              {/* Hover glow */}
-              <div className="absolute inset-0 bg-gradient-to-br from-primary/10 to-secondary/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-2xl pointer-events-none" />
-              
-              <div className="w-16 h-16 rounded-xl glass flex items-center justify-center mb-6 relative z-10 border-border shadow-[0_0_20px_rgba(0,224,255,0.1)] group-hover:scale-110 transition-transform duration-500">
-                {benefit.icon}
+    <>
+      <section id="how" className="py-20 md:py-28 border-t border-border bg-card-muted">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="max-w-2xl mb-14">
+            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">Three steps to an answer</h2>
+            <p className="mt-4 text-muted-foreground text-lg">No setup, no modelling, no dashboards to configure.</p>
+          </div>
+          <div className="grid md:grid-cols-3 gap-6">
+            {steps.map((s) => (
+              <div key={s.n} className="relative">
+                <div className="text-5xl font-semibold text-primary/15 mb-3">{s.n}</div>
+                <h3 className="font-medium text-lg mb-2">{s.title}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">{s.desc}</p>
               </div>
-              <h3 className="text-xl font-bold text-foreground mb-4 relative z-10">{benefit.title}</h3>
-              <p className="text-muted-foreground leading-relaxed relative z-10">
-                {benefit.description}
-              </p>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+
+      <section id="why" className="py-20 md:py-28 border-t border-border">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 grid md:grid-cols-2 gap-12 items-center">
+          <div>
+            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">Built for answers you can trust</h2>
+            <p className="mt-4 text-muted-foreground text-lg leading-relaxed">
+              Most “AI analytics” tools let the model make up numbers. DataLens separates the two jobs:
+              the LLM only decides <em>what</em> to measure, and a deterministic engine does the arithmetic
+              on your real data. Every figure on screen traces back to a row you uploaded.
+            </p>
+            <ul className="mt-6 space-y-3">
+              {["LLM-planned, code-computed results", "SELECT-only SQL validation on the live-DB path", "Works offline with a deterministic fallback"].map((t) => (
+                <li key={t} className="flex items-center gap-3 text-sm">
+                  <span className="h-5 w-5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs">✓</span>
+                  {t}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="surface rounded-2xl p-6">
+            <div className="text-xs text-muted-foreground mb-2">Example insight</div>
+            <div className="text-sm leading-relaxed text-foreground">
+              “Profit peaked at <span className="font-medium">$81,202</span> in March 2025 before falling
+              <span className="font-medium"> 56%</span> by October. Investigate the Q4 dip in APAC, where
+              discounts rose fastest.”
+            </div>
+            <div className="mt-4 pt-4 border-t border-border text-xs text-muted-foreground">Generated from the sample dataset · grounded in computed rows</div>
+          </div>
+        </div>
+      </section>
+    </>
   );
 }
