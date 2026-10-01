@@ -6,7 +6,7 @@ const features = [
   { icon: Upload, title: "Bring your own data", desc: "Drop in any CSV. Columns and types are detected automatically." },
   { icon: ShieldCheck, title: "Safe by design", desc: "Generated SQL is parsed and validated SELECT-only with enforced row limits." },
   { icon: Database, title: "Numbers you can trust", desc: "The AI decides what to compute; the engine does the math — figures are never hallucinated." },
-  { icon: Zap, title: "Fast answers", desc: "Groq's inference returns interpretations and insights in a second or two." },
+  { icon: Zap, title: "Fast answers", desc: "Interpretations and insights come back in a second or two." },
 ];
 
 export default function Features() {

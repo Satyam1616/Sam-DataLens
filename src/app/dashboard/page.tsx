@@ -278,7 +278,6 @@ function MessageBubble({ msg, onSuggest, onSave, saving }: { msg: Message; onSug
             <div className="flex items-center justify-between gap-3 mb-3">
               <h3 className="text-sm font-medium truncate">{msg.result.title}</h3>
               <div className="flex items-center gap-2 flex-shrink-0">
-                {msg.poweredBy === "groq" && <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-muted-foreground"><Zap size={10} className="text-primary" /> Groq</span>}
                 <button onClick={() => onSave(msg.id, msg)} disabled={msg.saved || saving}
                   className={`inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors ${msg.saved ? "border-emerald-500/30 text-emerald-600 dark:text-emerald-400" : "border-border hover:bg-muted"}`}>
                   {saving ? <div className="h-3 w-3 rounded-full border-2 border-border border-t-primary animate-spin" /> : msg.saved ? <><CheckCircle2 size={13} /> Saved</> : <><Save size={13} /> Save</>}

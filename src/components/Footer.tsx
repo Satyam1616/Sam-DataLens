@@ -16,7 +16,7 @@ export default function Footer() {
           <a href="#how" className="hover:text-foreground transition-colors">How it works</a>
           <Link href="/dashboard" className="hover:text-foreground transition-colors">Open app</Link>
         </div>
-        <p className="text-xs text-muted-foreground">Built by Satyam Jha · Next.js + Groq</p>
+        <p className="text-xs text-muted-foreground">Built by Satyam Jha</p>
       </div>
     </footer>
   );

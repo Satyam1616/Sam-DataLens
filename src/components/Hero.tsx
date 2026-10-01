@@ -8,7 +8,7 @@ export default function Hero() {
       <div className="relative max-w-6xl mx-auto px-4 sm:px-6">
         <div className="max-w-3xl">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-border bg-muted text-xs font-medium text-muted-foreground mb-6">
-            <Sparkles size={13} className="text-primary" /> Powered by Groq LLMs
+            <Sparkles size={13} className="text-primary" /> No SQL. No dashboards. Just questions.
           </div>
           <h1 className="text-4xl sm:text-5xl md:text-6xl font-semibold tracking-tight leading-[1.05] text-foreground">
             Ask your data anything.<br />
