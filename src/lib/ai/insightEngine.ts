@@ -1,49 +1,85 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { PromptTemplate } from "@langchain/core/prompts";
 
+/**
+ * Groq-powered insight generator.
+ *
+ * Groq exposes an OpenAI-compatible endpoint, so we reuse LangChain's
+ * ChatOpenAI client and simply point it at Groq's base URL. The model is a
+ * reasoning model (gpt-oss), so we give it enough headroom in maxTokens.
+ */
+const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
+const DEFAULT_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+
 export class InsightGenerator {
-  private llm: ChatOpenAI;
+  private llm: ChatOpenAI | null;
 
   constructor() {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+      // No key configured — caller falls back to the deterministic insight.
+      this.llm = null;
+      return;
+    }
+
     try {
-      this.llm = new ChatOpenAI({ 
-        modelName: "gpt-4o-mini",
-        temperature: 0.2,
+      this.llm = new ChatOpenAI({
+        model: DEFAULT_MODEL,
+        temperature: 0.3,
+        maxTokens: 1024,
+        apiKey,
+        configuration: { baseURL: GROQ_BASE_URL },
       });
     } catch (e) {
-      console.warn("InsightGenerator initialized without OPENAI_API_KEY");
-      this.llm = null as any;
+      console.warn("InsightGenerator: failed to initialise Groq client", e);
+      this.llm = null;
     }
   }
 
-  public async generateInsight(question: string, queryResults: any[]): Promise<string> {
-    if (!this.llm) {
-        throw new Error("Cannot generate insight: OpenAI API Key is missing.");
-    }
+  /** Whether a live LLM is available. */
+  public get isLive(): boolean {
+    return this.llm !== null;
+  }
 
-    const promptText = `
-You are an expert Data Analyst and Business Intelligence tool.
-A user asked the following question:
+  /**
+   * Turns the *actual* aggregated result set into a concise, business-facing
+   * narrative. Returns null on any failure so the caller can fall back to the
+   * deterministic insight — the demo must never hard-fail on an LLM hiccup.
+   */
+  public async generateInsight(
+    question: string,
+    queryResults: unknown[]
+  ): Promise<string | null> {
+    if (!this.llm) return null;
+
+    const promptText = `You are a senior data analyst embedded in a business-intelligence tool.
+
+A user asked:
 "{question}"
 
-The database returned the following data (in JSON format):
+The analytics engine returned this result set (JSON):
 {queryResults}
 
-Analyze the data and provide:
-1. A concise, one-paragraph summary of the directly relevant facts.
-2. A single, actionable business recommendation based on this data.
+Write a tight, two-to-three sentence insight for a business reader:
+1. Lead with the single most important fact grounded in the numbers above.
+2. Follow with one concrete, actionable recommendation.
 
-Do not mention the SQL query itself or the raw JSON. Speak directly to the business user.
-`;
-    
-    const prompt = PromptTemplate.fromTemplate(promptText);
-    const chain = prompt.pipe(this.llm);
-    
-    const response = await chain.invoke({
+Rules: reference real figures from the data, never invent numbers, do not mention SQL or JSON, and do not use markdown headings.`;
+
+    try {
+      const prompt = PromptTemplate.fromTemplate(promptText);
+      const chain = prompt.pipe(this.llm);
+      const response = await chain.invoke({
         question,
-        queryResults: JSON.stringify(queryResults).substring(0, 3000) // Truncate to save tokens
-    });
-    
-    return response.content.toString();
+        // Cap payload so we stay well within token limits.
+        queryResults: JSON.stringify(queryResults).substring(0, 3000),
+      });
+
+      const text = response.content.toString().trim();
+      return text.length > 0 ? text : null;
+    } catch (error) {
+      console.warn("InsightGenerator: Groq call failed, using fallback.", error);
+      return null;
+    }
   }
 }
